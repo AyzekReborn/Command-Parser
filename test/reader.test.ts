@@ -1,4 +1,4 @@
-import StringReader, { InvalidCursorPositionError } from './reader';
+import StringReader, { InvalidCursorPositionError } from '../src/reader';
 
 describe('Reader', () => {
 	it('should correctly clone', () => {

@@ -1,5 +1,5 @@
-import { stringArgument, listArgument } from "./arguments";
-import StringReader from "./reader";
+import { stringArgument, listArgument } from "../src/arguments";
+import StringReader from "../src/reader";
 
 describe('Arguments', () => {
 	it('should correctly read list with separator', () => {

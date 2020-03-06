@@ -1,8 +1,8 @@
-import { command } from "../bot/plugin";
-import { ArgumentType, ParsedArgument, stringArgument } from "./arguments";
-import { CommandDispatcher, ParseEntryPoint } from "./command";
-import StringRange from "./range";
-import StringReader from "./reader";
+import { command } from ".";
+import { ArgumentType, ParsedArgument, stringArgument } from "../src/arguments";
+import { CommandDispatcher, ParseEntryPoint } from "../src/command";
+import StringRange from "../src/range";
+import StringReader from "../src/reader";
 
 describe('Command context', async () => {
 	const executable: any = {};
