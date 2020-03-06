@@ -1,0 +1,11 @@
+{
+	"name": "@ayzek/command-parser",
+	"description": "Command parser inspired by Mojang's brigadier, used in Ayzek",
+	"version": "1.0.0",
+	"main": "index.js",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/jasmine": "^3.5.8",
+		"typescript": "^3.8.3"
+	}
+}
