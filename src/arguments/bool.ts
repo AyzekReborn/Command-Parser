@@ -10,10 +10,10 @@ export class BoolArgumentType extends SimpleArgumentType<boolean> {
 	async listSuggestions<P, S>(_entry: ParseEntryPoint<P>, _ctx: CommandContext<S, any, any>, builder: SuggestionsBuilder) {
 		let buffer = builder.remaining.toLowerCase();
 		if ('true'.startsWith(buffer)) {
-			builder.suggest('true', null);
+			builder.suggest('true');
 		}
 		if ('false'.startsWith(buffer)) {
-			builder.suggest('false', null);
+			builder.suggest('false');
 		}
 		return builder.build();
 	}

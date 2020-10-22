@@ -5,7 +5,7 @@ import { SimpleArgumentType } from "./core";
 export type StringType = 'single_word' | 'quotable_phraze' | 'greedy_phraze';
 
 export class StringArgumentType extends SimpleArgumentType<string> {
-	constructor(public readonly type: StringType, public readonly customExamples: string[] | null) {
+	constructor(public readonly type: StringType, public readonly customExamples?: string[]) {
 		super();
 	}
 

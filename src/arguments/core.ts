@@ -26,7 +26,7 @@ export abstract class ArgumentType<P, T> {
 		const remaining = builder.remaining;
 		for (const literal of this.getExamples(entry))
 			if (literal.startsWith(remaining))
-				builder.suggest(literal, null);
+				builder.suggest(literal);
 		return builder.build();
 	}
 

@@ -20,10 +20,11 @@ export default class StringRange {
 	get length() {
 		return this.end - this.start;
 	}
-	equals(other: StringRange) {
-		return this.start === other.start && this.end === other.end;
-	}
 	toString() {
 		return `(${this.start}, ${this.end})`;
+	}
+
+	equals(other: this) {
+		return this.start === other.start && this.end === other.end;
 	}
 }

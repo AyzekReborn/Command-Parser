@@ -4,8 +4,8 @@ import { CommandSyntaxError, UnknownSomethingError } from "./error";
 import StringRange from "./range";
 import StringReader from "./reader";
 import { SuggestionContext, Suggestions, SuggestionsBuilder } from "./suggestions";
-import { LiteralCommandNode, ParsedCommandNode, RootCommandNode } from "./tree";
 import type { CommandNode } from './tree';
+import { LiteralCommandNode, ParsedCommandNode, RootCommandNode } from "./tree";
 import { padList } from './util/pad';
 import type { MaybePromise } from './util/promise';
 
@@ -34,10 +34,6 @@ export const USAGE_OPTIONAL_CLOSE = ']';
 export const USAGE_REQUIRED_OPEN = '(';
 export const USAGE_REQUIRED_CLOSE = ')';
 export const USAGE_OR = '|';
-
-function hasCommand<S>(node: CommandNode<S, any, any>): boolean {
-	return node !== null && (node.command !== null || node.children.some(hasCommand))
-}
 
 export type ExecuteResultWrapper<R> = {
 	result: 'success',
@@ -83,79 +79,44 @@ export class CommandDispatcher<S, ReturnValue> {
 				throw new UnknownSomethingError(parse.reader, 'command');
 			}
 		}
-		let forked = false;
 		let foundCommand = false;
 		let command = parse.reader.string;
 		let original = parse.context.build(command);
-		let contexts: CommandContext<S, any, ReturnValue>[] | null = [original];
-		let next: CommandContext<S, any, ReturnValue>[] | null = null;
+		let context: CommandContext<S, any, ReturnValue> | undefined = original;
+		let next: CommandContext<S, any, ReturnValue> | undefined;
 		const result: ExecuteResultWrapper<ReturnValue>[] = [];
-		while (contexts != null) {
-			let size = contexts.length;
-			for (let i = 0; i < size; i++) {
-				let context = contexts[i];
-				let child = context.child;
-				if (child != null) {
-					if (context.forks) {
-						forked = true;
-					}
-					if (child.hasNodes) {
-						foundCommand = true;
-						let modifier = context.modifier;
-						if (modifier == null) {
-							if (next == null) {
-								next = [];
-							}
-							next.push(child.copyFor(context.source));
-						} else {
-							try {
-								let results = modifier(context);
-								if (results.length !== 0) {
-									if (next == null) {
-										next = []
-									}
-									for (let source of results) {
-										next.push(child.copyFor(source));
-									}
-								}
-							} catch (e) {
-								this.consumer(context, false);
-								if (!forked) {
-									throw e;
-								} else {
-									result.push({
-										result: 'error',
-										error: e
-									});
-								}
-							}
-						}
-					}
-				} else if (context.command != null) {
+		while (context) {
+			if (context.child) {
+				if (context.child.hasNodes) {
 					foundCommand = true;
-					try {
-						const value = await context.command(context);
-						this.consumer(context, true);
-						result.push({
-							result: 'success',
-							value
-						});
-					} catch (e) {
-						this.consumer(context, false);
-						if (!forked) {
+					if (context.modifier) {
+						try {
+							next = context.child.copyFor(context.modifier(context));
+						} catch (e) {
+							this.consumer(context, false);
 							throw e;
-						} else {
-							result.push({
-								result: 'error',
-								error: e
-							});
 						}
+					} else {
+						next = context.child.copyFor(context.source)
 					}
+				}
+			} else if (context.command) {
+				foundCommand = true;
+				try {
+					const value = await context.command(context);
+					this.consumer(context, true);
+					result.push({
+						result: 'success',
+						value
+					});
+				} catch (e) {
+					this.consumer(context, false);
+					throw e;
 				}
 			}
 
-			contexts = next;
-			next = null;
+			context = next;
+			next = undefined;
 		}
 		if (!foundCommand) {
 			this.consumer(original, false);
@@ -204,8 +165,8 @@ export class CommandDispatcher<S, ReturnValue> {
 
 	private async parseNodes<P>(ctx: ParseEntryPoint<P>, node: CommandNode<S, any, ReturnValue>, originalReader: StringReader, contextSoFar: CommandContextBuilder<S, any, ReturnValue>): Promise<ParseResults<S>> {
 		let source: S = contextSoFar.source;
-		let errors: Map<CommandNode<S, any, ReturnValue>, Error> | null = null;
-		let potentials: ParseResults<S>[] | null = null;
+		let errors: Map<CommandNode<S, any, ReturnValue>, Error> | undefined;
+		let potentials: ParseResults<S>[] | undefined;
 		let cursor = originalReader.cursor;
 		for (let child of node.getRelevant(originalReader)) {
 			if (!child.canUse(source))
@@ -220,7 +181,7 @@ export class CommandDispatcher<S, ReturnValue> {
 					if (reader.peek() != ARGUMENT_SEPARATOR)
 						throw new ExpectedArgumentSeparatorError(reader);
 			} catch (parseError) {
-				if (errors == null) {
+				if (!errors) {
 					errors = new Map();
 				}
 				errors.set(child, parseError);
@@ -229,9 +190,9 @@ export class CommandDispatcher<S, ReturnValue> {
 			}
 
 			context.withCommand(child.command);
-			if (reader.canRead(child.redirect == null ? 2 : 1)) {
+			if (reader.canRead(child.redirect == undefined ? 2 : 1)) {
 				reader.skip();
-				if (child.redirect !== null) {
+				if (child.redirect) {
 					let childContext: CommandContextBuilder<S, any, ReturnValue> = new CommandContextBuilder(this, source, child.redirect, reader.cursor);
 					let parse: ParseResults<S> = await this.parseNodes(ctx, child.redirect, reader, childContext);
 					context.withChild(parse.context);
@@ -242,14 +203,14 @@ export class CommandDispatcher<S, ReturnValue> {
 					};
 				} else {
 					let parse: ParseResults<S> = await this.parseNodes(ctx, child, reader, context);
-					if (potentials == null) {
+					if (!potentials) {
 						potentials = [];
 					}
 
 					potentials.push(parse);
 				}
 			} else {
-				if (potentials == null) {
+				if (!potentials) {
 					potentials = [];
 				}
 				potentials.push({
@@ -260,7 +221,7 @@ export class CommandDispatcher<S, ReturnValue> {
 			}
 		}
 
-		if (!(potentials == null)) {
+		if (potentials) {
 			if (potentials.length > 1) {
 				potentials.sort((a, b) => {
 					if (!a.reader.canReadAnything && b.reader.canReadAnything) {
@@ -284,7 +245,7 @@ export class CommandDispatcher<S, ReturnValue> {
 		return {
 			context: contextSoFar,
 			reader: originalReader,
-			exceptions: errors == null ? new Map() : errors
+			exceptions: errors ?? new Map(),
 		};
 	}
 
@@ -299,7 +260,7 @@ export class CommandDispatcher<S, ReturnValue> {
 			return;
 		}
 
-		if (node.command != null) {
+		if (node.command) {
 			if (node.commandDescription) {
 				result.push(`${prefix.trim()} — ${node.commandDescription}`);
 			} else {
@@ -307,7 +268,7 @@ export class CommandDispatcher<S, ReturnValue> {
 			}
 		}
 
-		if (node.redirect != null) {
+		if (node.redirect) {
 			const redirect = node.redirect === this.root ?
 				("..." + (node.commandDescription ? ` — ${node.commandDescription}` : '')) :
 				"-> " + node.redirect.usage;
@@ -325,10 +286,10 @@ export class CommandDispatcher<S, ReturnValue> {
 	public getSmartUsage(node: CommandNode<S, any, ReturnValue>, source: S): Map<CommandNode<S, any, ReturnValue>, string> {
 		let result = new Map<CommandNode<S, any, ReturnValue>, string>();
 
-		let optional = node.command !== null;
+		let optional = node.command !== undefined;
 		for (let child of node.children) {
 			let usage = this.__getSmartUsage(child, source, optional, false);
-			if (!(usage == null)) {
+			if (usage) {
 				result.set(child, usage);
 			}
 		}
@@ -342,12 +303,12 @@ export class CommandDispatcher<S, ReturnValue> {
 		}
 
 		let self = optional ? USAGE_OPTIONAL_OPEN + node.usage + USAGE_OPTIONAL_CLOSE : node.usage;
-		let childOptional = node.command != null;
+		let childOptional = node.command != undefined;
 		let open = childOptional ? USAGE_OPTIONAL_OPEN : USAGE_REQUIRED_OPEN;
 		let close = childOptional ? USAGE_OPTIONAL_CLOSE : USAGE_REQUIRED_CLOSE;
 
 		if (!deep) {
-			if ((node.redirect != null)) {
+			if (node.redirect) {
 				let redirect = node.redirect == this.root ? "..." : "-> " + node.redirect.usage;
 				return self + ARGUMENT_SEPARATOR + redirect;
 			}
@@ -355,7 +316,7 @@ export class CommandDispatcher<S, ReturnValue> {
 				let children: CommandNode<S, any, any>[] = [...node.children].filter(c => c.canUse(source));
 				if ((children.length == 1)) {
 					let usage = this.__getSmartUsage(children[0], source, childOptional, childOptional);
-					if (!(usage == null)) {
+					if (usage) {
 						return self + ARGUMENT_SEPARATOR + usage;
 					}
 				}
@@ -363,7 +324,7 @@ export class CommandDispatcher<S, ReturnValue> {
 					let childUsage = new Set<string>();
 					for (let child of children) {
 						let usage = this.__getSmartUsage(child, source, childOptional, true);
-						if (!(usage == null)) {
+						if (usage) {
 							childUsage.add(usage);
 						}
 					}
@@ -437,14 +398,13 @@ export class CommandContext<S, O extends CurrentArguments, ReturnValue> {
 	constructor(
 		public source: S,
 		public input: string,
-		public command: Command<S, O, ReturnValue> | null,
 		public parsedArguments: Map<string, ParsedArgument<S, any>>,
 		public rootNode: CommandNode<S, O, ReturnValue>,
 		private nodes: ParsedCommandNode<S, ReturnValue>[],
 		public range: StringRange,
-		public child: CommandContext<S, O, ReturnValue> | null,
-		public modifier: RedirectModifier<S, O, ReturnValue> | null,
-		public forks: boolean
+		public command?: Command<S, O, ReturnValue>,
+		public child?: CommandContext<S, O, ReturnValue>,
+		public modifier?: RedirectModifier<S, O, ReturnValue>,
 	) {
 		this.getArgument = this.getArgument.bind(this);
 	}
@@ -453,14 +413,13 @@ export class CommandContext<S, O extends CurrentArguments, ReturnValue> {
 		let copy = new CommandContext<S, O, ReturnValue>(
 			this.source,
 			this.input,
-			this.command,
 			this.parsedArguments,
 			this.rootNode,
 			this.nodes,
 			this.range,
+			this.command,
 			this.child,
 			this.modifier,
-			this.forks
 		);
 		return copy;
 	}
@@ -470,14 +429,13 @@ export class CommandContext<S, O extends CurrentArguments, ReturnValue> {
 		let copy = new CommandContext<S, O, ReturnValue>(
 			source,
 			this.input,
-			this.command,
 			this.parsedArguments,
 			this.rootNode,
 			this.nodes,
 			this.range,
+			this.command,
 			this.child,
 			this.modifier,
-			this.forks
 		);
 		return copy;
 	}
@@ -519,11 +477,10 @@ export class CommandContext<S, O extends CurrentArguments, ReturnValue> {
 export default class CommandContextBuilder<S, O extends CurrentArguments, ReturnValue> {
 	args: Map<string, ParsedArgument<S, any>> = new Map();
 	nodes: Array<ParsedCommandNode<S, ReturnValue>> = [];
-	command: Command<S, O, ReturnValue> | null = null;
-	child: CommandContextBuilder<S, O, ReturnValue> | null = null;
+	command?: Command<S, O, ReturnValue>;
+	child?: CommandContextBuilder<S, O, ReturnValue>;
 	range: StringRange;
-	modifier: RedirectModifier<S, O, ReturnValue> | null = null;
-	forks: boolean = false;
+	modifier?: RedirectModifier<S, O, ReturnValue>;
 	constructor(public dispatcher: CommandDispatcher<S, ReturnValue>, public source: S, public rootNode: CommandNode<S, O, ReturnValue>, start: number) {
 		this.range = StringRange.at(start);
 	}
@@ -538,7 +495,7 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 		return this;
 	}
 
-	withCommand(command: Command<S, O, ReturnValue> | null): CommandContextBuilder<S, O, ReturnValue> {
+	withCommand(command?: Command<S, O, ReturnValue>): CommandContextBuilder<S, O, ReturnValue> {
 		this.command = command;
 		return this;
 	}
@@ -547,7 +504,6 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 		this.nodes.push(new ParsedCommandNode(node, range));
 		this.range = StringRange.encompassing(this.range, range);
 		this.modifier = node.modifier;
-		this.forks = node.forks;
 		return this;
 	}
 
@@ -558,7 +514,6 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 		copy.nodes.push(...this.nodes);
 		copy.child = this.child;
 		copy.range = this.range;
-		copy.forks = this.forks;
 		return copy;
 	}
 
@@ -569,7 +524,7 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 
 	getLastChild(): CommandContextBuilder<S, O, ReturnValue> {
 		let result: CommandContextBuilder<S, O, ReturnValue> = this;
-		while (result.child != null) {
+		while (result.child) {
 			result = result.child;
 		}
 		return result;
@@ -579,21 +534,20 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 		return new CommandContext<S, O, ReturnValue>(
 			this.source,
 			input,
-			this.command,
 			this.args,
 			this.rootNode,
 			this.nodes,
 			this.range,
-			this.child == null ? null : this.child.build(input),
+			this.command,
+			this.child?.build(input),
 			this.modifier,
-			this.forks
 		);
 	}
 
 	findSuggestionContext(cursor: number): SuggestionContext<S> {
 		if ((this.range.start <= cursor)) {
 			if ((this.range.end < cursor)) {
-				if ((this.child != null)) {
+				if (this.child) {
 					return this.child.findSuggestionContext(cursor);
 				}
 				else if (this.nodes.length > 0) {
@@ -613,7 +567,7 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 					}
 					prev = node.node;
 				}
-				if ((prev == null)) {
+				if (!prev) {
 					throw new Error("Can't find node before cursor");
 				}
 				return new SuggestionContext(prev, this.range.start);
@@ -624,5 +578,4 @@ export default class CommandContextBuilder<S, O extends CurrentArguments, Return
 }
 
 export type Command<Source, O extends CurrentArguments, ReturnValue> = (context: CommandContext<Source, O, ReturnValue>) => MaybePromise<ReturnValue | void>;
-export type RedirectModifier<Source, O extends CurrentArguments, ReturnValue> = (context: CommandContext<Source, O, ReturnValue>) => Source[];
-export type SingleRedirectModifier<Source, O extends CurrentArguments, ReturnValue> = (context: CommandContext<Source, O, ReturnValue>) => Source;
+export type RedirectModifier<Source, O extends CurrentArguments, ReturnValue> = (context: CommandContext<Source, O, ReturnValue>) => Source;
