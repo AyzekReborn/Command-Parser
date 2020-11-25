@@ -6,7 +6,6 @@ import StringReader from "./reader";
 import { SuggestionContext, Suggestions, SuggestionsBuilder } from "./suggestions";
 import type { CommandNode } from './tree';
 import { LiteralCommandNode, ParsedCommandNode, RootCommandNode } from "./tree";
-import { padList } from './util/pad';
 import type { MaybePromise } from './util/promise';
 
 export enum ThingType {
@@ -249,141 +248,12 @@ export class CommandDispatcher<S, ReturnValue> {
 		};
 	}
 
-	public getAllUsage(node: CommandNode<S, any, ReturnValue>, source: S, restricted: boolean): string[] {
-		const result: Array<string> = [];
-		this.__getAllUsage(node, source, result, "", restricted);
-		return result;
-	}
-
-	private __getAllUsage(node: CommandNode<S, any, ReturnValue>, source: S, result: string[], prefix = "", restricted: boolean) {
-		if (restricted && !node.canUse(source)) {
-			return;
-		}
-
-		if (node.command) {
-			if (node.commandDescription) {
-				result.push(`${prefix.trim()} — ${node.commandDescription}`);
-			} else {
-				result.push(prefix);
-			}
-		}
-
-		if (node.redirect) {
-			const redirect = node.redirect === this.root ?
-				("..." + (node.commandDescription ? ` — ${node.commandDescription}` : '')) :
-				"-> " + node.redirect.usage;
-			result.push(prefix.length === 0 ? ARGUMENT_SEPARATOR + redirect : prefix + ARGUMENT_SEPARATOR + redirect);
-		}
-		else if (node.children.length > 0) {
-			for (let child of node.children) {
-				this.__getAllUsage(child, source, result, prefix.length === 0 ? child.usage : prefix + ARGUMENT_SEPARATOR + child.usage, restricted);
-			}
-
-		}
-
-	}
-
-	public getSmartUsage(node: CommandNode<S, any, ReturnValue>, source: S): Map<CommandNode<S, any, ReturnValue>, string> {
-		let result = new Map<CommandNode<S, any, ReturnValue>, string>();
-
-		let optional = node.command !== undefined;
-		for (let child of node.children) {
-			let usage = this.__getSmartUsage(child, source, optional, false);
-			if (usage) {
-				result.set(child, usage);
-			}
-		}
-
-		return result;
-	}
-
-	private __getSmartUsage(node: CommandNode<S, any, ReturnValue>, source: S, optional: boolean, deep: boolean): string | null {
-		if (!node.canUse(source)) {
-			return null;
-		}
-
-		let self = optional ? USAGE_OPTIONAL_OPEN + node.usage + USAGE_OPTIONAL_CLOSE : node.usage;
-		let childOptional = node.command != undefined;
-		let open = childOptional ? USAGE_OPTIONAL_OPEN : USAGE_REQUIRED_OPEN;
-		let close = childOptional ? USAGE_OPTIONAL_CLOSE : USAGE_REQUIRED_CLOSE;
-
-		if (!deep) {
-			if (node.redirect) {
-				let redirect = node.redirect == this.root ? "..." : "-> " + node.redirect.usage;
-				return self + ARGUMENT_SEPARATOR + redirect;
-			}
-			else {
-				let children: CommandNode<S, any, any>[] = [...node.children].filter(c => c.canUse(source));
-				if ((children.length == 1)) {
-					let usage = this.__getSmartUsage(children[0], source, childOptional, childOptional);
-					if (usage) {
-						return self + ARGUMENT_SEPARATOR + usage;
-					}
-				}
-				else if (children.length > 1) {
-					let childUsage = new Set<string>();
-					for (let child of children) {
-						let usage = this.__getSmartUsage(child, source, childOptional, true);
-						if (usage) {
-							childUsage.add(usage);
-						}
-					}
-					if (childUsage.size === 1) {
-						let usage = childUsage.values().next().value;
-						return self + ARGUMENT_SEPARATOR + (childOptional ? USAGE_OPTIONAL_OPEN + usage + USAGE_OPTIONAL_CLOSE : usage);
-					}
-					else if (childUsage.size > 1) {
-						let builder = open;
-						let count = 0;
-						for (let child of children) {
-							if (count > 0) {
-								builder += USAGE_OR;
-							}
-							builder += child.usage;
-							count++;
-						}
-						if (count > 0) {
-							builder += close;
-							return self + ARGUMENT_SEPARATOR + builder;
-						}
-					}
-				}
-			}
-		}
-		return self;
-	}
-
 	getName<S>(node: CommandNode<S, any, any>): string {
 		if (node instanceof LiteralCommandNode) {
 			return node.name;
 		} else {
 			return `<${node.name}>`;
 		}
-	}
-
-	poorManUsage<S>(node: CommandNode<S, any, any>): string[] {
-		return this._poorManUsage(node, false);
-	}
-
-	private _poorManUsage<S>(node: CommandNode<S, any, any>, printCurrent = true): string[] {
-		let result = [];
-		let innerItems = 0;
-		result.push(this.getName(node));
-		let innerResult = [];
-		for (let child of node.children) {
-			innerItems++;
-			innerResult.push(...this._poorManUsage(child));
-		}
-		if (!printCurrent) {
-			result = innerResult;
-		} else if (innerItems === 1) {
-			let start = result[0];
-			result = innerResult;
-			result[0] = start + ' ' + result[0];
-		} else {
-			result.push(...padList(innerResult));
-		}
-		return result;
 	}
 }
 
