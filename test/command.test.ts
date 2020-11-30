@@ -28,7 +28,7 @@ describe('Command context', async () => {
 	);
 	subject.register(command("b").thenLiteral("1", b => b.executes(executable)));
 	subject.register(command("c").executes(executable));
-	subject.register(command("d").requires(_s => false).executes(executable));
+	subject.register(command("d").requires(_s => ({})).executes(executable));
 	subject.register(
 		command("e")
 			.executes(executable)
@@ -46,11 +46,11 @@ describe('Command context', async () => {
 				.thenLiteral("i", b => b
 					.executes(executable))
 				.thenLiteral("ii", b => b
-					.executes(executable).requires(_s => false))
+					.executes(executable).requires(_s => ({})))
 			)
 			.thenLiteral("2", b => b
 				.thenLiteral("i", b => b
-					.executes(executable).requires(_s => false))
+					.executes(executable).requires(_s => ({})))
 				.thenLiteral("ii", b => b
 					.executes(executable))
 			)

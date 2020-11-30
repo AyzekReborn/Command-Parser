@@ -1,6 +1,6 @@
 import type { ArgumentType } from "./arguments";
 import type { Command, CurrentArguments, RedirectModifier } from "./command";
-import type { Requirement } from "./requirement";
+import { normalizeRequirement, Requirement } from "./requirement";
 import type { SuggestionProvider } from "./suggestions";
 import type { CommandNode } from './tree';
 import { ArgumentCommandNode, LiteralCommandNode, RootCommandNode } from "./tree";
@@ -14,7 +14,7 @@ export abstract class ArgumentBuilder<Source,
 	command?: Command<Source, ArgumentTypeMap, ReturnValue>;
 	commandDescription?: string;
 
-	requirement: Requirement<Source> = () => true;
+	requirement: Requirement<Source, ReturnValue> | Requirement<Source, ReturnValue>[] | undefined;
 	target?: CommandNode<Source, ArgumentTypeMap, ReturnValue>;
 	modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>;
 
@@ -54,8 +54,14 @@ export abstract class ArgumentBuilder<Source,
 		return this;
 	}
 
-	requires(requirement: Requirement<Source>) {
-		this.requirement = requirement;
+	requires(requirement: Requirement<Source, ReturnValue>) {
+		if (this.requirement instanceof Array) {
+			this.requirement.push(requirement);
+		} else if (this.requirement != undefined) {
+			this.requirement = [this.requirement, requirement];
+		} else {
+			this.requirement = requirement;
+		}
 		return this;
 	}
 
@@ -91,7 +97,11 @@ export class LiteralArgumentBuilder<Source, ArgumentTypeMap extends CurrentArgum
 	}
 
 	build() {
-		let result: LiteralCommandNode<Source, ArgumentTypeMap, ReturnValue> = new LiteralCommandNode(this.literals, this.command, this.commandDescription, this.requirement, this.target, this.modifier);
+		let result: LiteralCommandNode<Source, ArgumentTypeMap, ReturnValue> = new LiteralCommandNode(
+			this.literals, this.command,
+			this.commandDescription,
+			normalizeRequirement(this.requirement),
+			this.target, this.modifier);
 		for (let argument of this.argumentList) {
 			result.addChild(argument as any);
 		}
@@ -112,7 +122,11 @@ export class RequiredArgumentBuilder<Name extends string, Source, ParsedThisArgu
 	}
 
 	build(): ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue> {
-		let result = new ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue>(this.name, this.type, this.suggestionsProvider, this.command, this.commandDescription, this.requirement, this.target, this.modifier);
+		let result = new ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue>(
+			this.name, this.type, this.suggestionsProvider, this.command,
+			this.commandDescription,
+			normalizeRequirement(this.requirement),
+			this.target, this.modifier);
 		for (let argument of this.argumentList) {
 			result.addChild(argument as any);
 		}

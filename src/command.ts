@@ -3,6 +3,7 @@ import type { LiteralArgumentBuilder } from "./builder";
 import { CommandSyntaxError, UnknownSomethingError } from "./error";
 import StringRange from "./range";
 import StringReader from "./reader";
+import { RequirementFailedError } from "./requirement";
 import { SuggestionContext, Suggestions, SuggestionsBuilder } from "./suggestions";
 import type { CommandNode } from './tree';
 import { LiteralCommandNode, ParsedCommandNode, RootCommandNode } from "./tree";
@@ -136,8 +137,12 @@ export class CommandDispatcher<S, ReturnValue> {
 		let futures = [];
 
 		for (let node of parent.children) {
-			if (!node.canUse(source))
-				continue;
+			const failure = node.checkRequirement(source);
+			if (failure) {
+				if (!failure.showInTree) {
+					continue;
+				}
+			}
 			let nodeSuggestions = Suggestions.empty;
 			try {
 				nodeSuggestions = await node.listSuggestions(entry, context.build(truncatedInput), new SuggestionsBuilder(truncatedInput, start, {
@@ -164,12 +169,17 @@ export class CommandDispatcher<S, ReturnValue> {
 
 	private async parseNodes<P>(ctx: ParseEntryPoint<P>, node: CommandNode<S, any, ReturnValue>, originalReader: StringReader, contextSoFar: CommandContextBuilder<S, any, ReturnValue>): Promise<ParseResults<S>> {
 		let source: S = contextSoFar.source;
-		let errors: Map<CommandNode<S, any, ReturnValue>, Error> | undefined;
-		let potentials: ParseResults<S>[] | undefined;
+		let errors: Map<CommandNode<S, any, ReturnValue>, Error> = new Map();
+		let potentials: ParseResults<S>[] = [];
 		let cursor = originalReader.cursor;
 		for (let child of node.getRelevant(originalReader)) {
-			if (!child.canUse(source))
-				continue;
+			const failure = child.checkRequirement(source);
+			if (failure) {
+				if (!failure.reason) {
+					continue;
+				}
+				errors.set(child, new RequirementFailedError(failure.reason));
+			}
 
 			let context: CommandContextBuilder<S, any, ReturnValue> = contextSoFar.copy();
 			let reader: StringReader = originalReader.clone();
@@ -180,9 +190,6 @@ export class CommandDispatcher<S, ReturnValue> {
 					if (reader.peek() != ARGUMENT_SEPARATOR)
 						throw new ExpectedArgumentSeparatorError(reader);
 			} catch (parseError) {
-				if (!errors) {
-					errors = new Map();
-				}
 				errors.set(child, parseError);
 				reader.cursor = cursor;
 				continue;
@@ -202,16 +209,9 @@ export class CommandDispatcher<S, ReturnValue> {
 					};
 				} else {
 					let parse: ParseResults<S> = await this.parseNodes(ctx, child, reader, context);
-					if (!potentials) {
-						potentials = [];
-					}
-
 					potentials.push(parse);
 				}
 			} else {
-				if (!potentials) {
-					potentials = [];
-				}
 				potentials.push({
 					context,
 					reader,
@@ -220,7 +220,7 @@ export class CommandDispatcher<S, ReturnValue> {
 			}
 		}
 
-		if (potentials) {
+		if (potentials.length !== 0) {
 			if (potentials.length > 1) {
 				potentials.sort((a, b) => {
 					if (!a.reader.canReadAnything && b.reader.canReadAnything) {
@@ -244,7 +244,7 @@ export class CommandDispatcher<S, ReturnValue> {
 		return {
 			context: contextSoFar,
 			reader: originalReader,
-			exceptions: errors ?? new Map(),
+			exceptions: errors,
 		};
 	}
 

@@ -3,7 +3,7 @@ import CommandContextBuilder, { Command, CommandContext, CurrentArguments, Parse
 import { CommandSyntaxError } from "./error";
 import StringRange from "./range";
 import StringReader from "./reader";
-import { Requirement } from "./requirement";
+import { NormalizedRequirement, RequirementFailure } from "./requirement";
 import { SuggestionProvider, Suggestions, SuggestionsBuilder } from "./suggestions";
 import { MaybePromise } from './util/promise';
 
@@ -15,7 +15,7 @@ export abstract class CommandNode<Source, ArgumentTypeMap extends CurrentArgumen
 	constructor(
 		public command?: Command<Source, ArgumentTypeMap, ReturnValue>,
 		public commandDescription?: string,
-		public readonly requirement?: Requirement<Source>,
+		public readonly requirement?: NormalizedRequirement<Source, ReturnValue>,
 		public readonly redirect?: CommandNode<Source, ArgumentTypeMap, ReturnValue>,
 		public readonly modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>,
 	) { }
@@ -23,11 +23,27 @@ export abstract class CommandNode<Source, ArgumentTypeMap extends CurrentArgumen
 	getChild(name: string) {
 		return this.childrenMap.get(name);
 	}
-	canUse(source: Source): boolean {
-		if (this.requirement && !this.requirement(source)) return false;
-		if (this.command) return true;
-		if (this.redirect && this.redirect.canUse(source)) return true;
-		return this.children.some(child => child.canUse(source));
+	checkRequirement(source: Source): RequirementFailure<ReturnValue> | undefined {
+		if (this.requirement) {
+			let failure = this.requirement(source);
+			if (failure) {
+				return failure;
+			}
+		}
+		if (this.command) {
+			return;
+		}
+		if (this.redirect) {
+			let failure = this.redirect.checkRequirement(source);
+			if (!failure) {
+				return;
+			}
+		}
+		for (let child of this.children) {
+			let failure = child.checkRequirement(source);
+			if (!failure)
+				return;
+		}
 	}
 	removeChild(node: CommandNode<Source, ArgumentTypeMap, ReturnValue>) {
 		this.childrenMap.delete(node.name);
@@ -158,7 +174,7 @@ export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> exte
 		public readonly literalNames: string[],
 		command?: Command<S, O, ReturnValue>,
 		commandDescription?: string,
-		requirement?: Requirement<S>,
+		requirement?: NormalizedRequirement<S, ReturnValue>,
 		redirect?: CommandNode<S, O, ReturnValue>,
 		modifier?: RedirectModifier<S, O, ReturnValue>,
 	) {
@@ -243,7 +259,7 @@ export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> exte
 
 export class RootCommandNode<S, ReturnValue> extends CommandNode<S, {}, ReturnValue> {
 	constructor() {
-		super(undefined, undefined, () => true, undefined, (s: CommandContext<S, {}, any>) => s as any);
+		super(undefined, undefined, () => undefined, undefined, (s: CommandContext<S, {}, any>) => s as any);
 	}
 	get name() {
 		return '';
@@ -279,7 +295,7 @@ export class ArgumentCommandNode<N extends string, S, P, T, O extends CurrentArg
 		public readonly customSuggestions?: SuggestionProvider<S>,
 		command?: Command<S, O, ReturnValue>,
 		commandDescription?: string,
-		requirement?: Requirement<S>,
+		requirement?: NormalizedRequirement<S, ReturnValue>,
 		redirect?: CommandNode<S, O, ReturnValue>,
 		modifier?: RedirectModifier<S, O, ReturnValue>,
 	) {
