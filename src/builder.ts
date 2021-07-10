@@ -1,9 +1,9 @@
 import type { ArgumentType } from "./arguments";
-import type { Command, CurrentArguments, RedirectModifier, SingleRedirectModifier } from "./command";
-import type { Requirement } from "./requirement";
+import type { Command, CurrentArguments, RedirectModifier } from "./command";
+import { normalizeRequirement, Requirement } from "./requirement";
 import type { SuggestionProvider } from "./suggestions";
-import { ArgumentCommandNode, LiteralCommandNode, RootCommandNode } from "./tree";
 import type { CommandNode } from './tree';
+import { ArgumentCommandNode, LiteralCommandNode, RootCommandNode } from "./tree";
 
 export abstract class ArgumentBuilder<Source,
 	This extends ArgumentBuilder<Source, This, ArgumentTypeMap, ReturnValue>,
@@ -11,13 +11,12 @@ export abstract class ArgumentBuilder<Source,
 	> {
 
 	arguments = new RootCommandNode<Source, ReturnValue>();
-	command: Command<Source, ArgumentTypeMap, ReturnValue> | null = null;
-	commandDescription: string | null = null;
+	command?: Command<Source, ArgumentTypeMap, ReturnValue>;
+	commandDescription?: string;
 
-	requirement: Requirement<Source> = () => true;
-	target: CommandNode<Source, ArgumentTypeMap, ReturnValue> | null = null;
-	modifier: RedirectModifier<Source, ArgumentTypeMap, ReturnValue> | null = null;
-	forks: boolean = false;
+	requirement: Requirement<Source, ReturnValue> | Requirement<Source, ReturnValue>[] | undefined;
+	target?: CommandNode<Source, ArgumentTypeMap, ReturnValue>;
+	modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>;
 
 	then(builder: LiteralArgumentBuilder<Source, ArgumentTypeMap, ReturnValue>): this {
 		this.arguments.addChild(builder.build() as any);
@@ -49,35 +48,35 @@ export abstract class ArgumentBuilder<Source,
 		return this.arguments.children;
 	}
 
-	executes(command: Command<Source, ArgumentTypeMap, ReturnValue>, commandDescription: string | null = null) {
+	executes(command: Command<Source, ArgumentTypeMap, ReturnValue>, commandDescription?: string) {
 		this.command = command;
 		this.commandDescription = commandDescription;
 		return this;
 	}
 
-	requires(requirement: Requirement<Source>) {
-		this.requirement = requirement;
+	requires(requirement: Requirement<Source, ReturnValue>) {
+		if (this.requirement instanceof Array) {
+			this.requirement.push(requirement);
+		} else if (this.requirement != undefined) {
+			this.requirement = [this.requirement, requirement];
+		} else {
+			this.requirement = requirement;
+		}
 		return this;
 	}
 
-	redirect(target: CommandNode<Source, ArgumentTypeMap, ReturnValue>, modifier: SingleRedirectModifier<Source, ArgumentTypeMap, ReturnValue> | null = null, commandDescription: string | null = null) {
+	redirect(target: CommandNode<Source, ArgumentTypeMap, ReturnValue>, modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>, commandDescription?: string) {
 		this.commandDescription = commandDescription;
-		return this.forward(target, modifier === null ? null : s => [modifier(s)], false);
-	}
-
-	fork(target: CommandNode<Source, ArgumentTypeMap, ReturnValue>, modifier: RedirectModifier<Source, ArgumentTypeMap, ReturnValue> | null = null) {
-		return this.forward(target, modifier, true);
+		return this.forward(target, modifier);
 	}
 
 	forward(
-		target: CommandNode<Source, ArgumentTypeMap, ReturnValue> | null,
-		modifier: RedirectModifier<Source, ArgumentTypeMap, ReturnValue> | null,
-		forks: boolean
+		target?: CommandNode<Source, ArgumentTypeMap, ReturnValue>,
+		modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>,
 	) {
 		if (this.argumentList.length !== 0) throw new Error('Cannot forward a node with children');
 		this.target = target;
 		this.modifier = modifier;
-		this.forks = forks;
 		return this;
 	}
 
@@ -98,7 +97,11 @@ export class LiteralArgumentBuilder<Source, ArgumentTypeMap extends CurrentArgum
 	}
 
 	build() {
-		let result: LiteralCommandNode<Source, ArgumentTypeMap, ReturnValue> = new LiteralCommandNode(this.literals, this.command, this.commandDescription, this.requirement, this.target, this.modifier, this.forks);
+		let result: LiteralCommandNode<Source, ArgumentTypeMap, ReturnValue> = new LiteralCommandNode(
+			this.literals, this.command,
+			this.commandDescription,
+			normalizeRequirement(this.requirement),
+			this.target, this.modifier);
 		for (let argument of this.argumentList) {
 			result.addChild(argument as any);
 		}
@@ -107,7 +110,7 @@ export class LiteralArgumentBuilder<Source, ArgumentTypeMap extends CurrentArgum
 }
 
 export class RequiredArgumentBuilder<Name extends string, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap extends CurrentArguments, ReturnValue> extends ArgumentBuilder<Source, RequiredArgumentBuilder<Name, Source, ParsedThisArgument, ThisArgument, CurrentArguments, ReturnValue>, ArgumentTypeMap, ReturnValue> {
-	suggestionsProvider: SuggestionProvider<Source> | null = null;
+	suggestionsProvider?: SuggestionProvider<Source>;
 
 	constructor(public readonly name: Name, public readonly type: ArgumentType<ParsedThisArgument, ThisArgument>) {
 		super();
@@ -119,7 +122,11 @@ export class RequiredArgumentBuilder<Name extends string, Source, ParsedThisArgu
 	}
 
 	build(): ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue> {
-		let result = new ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue>(this.name, this.type, this.suggestionsProvider, this.command, this.commandDescription, this.requirement, this.target, this.modifier, this.forks);
+		let result = new ArgumentCommandNode<Name, Source, ParsedThisArgument, ThisArgument, ArgumentTypeMap, ReturnValue>(
+			this.name, this.type, this.suggestionsProvider, this.command,
+			this.commandDescription,
+			normalizeRequirement(this.requirement),
+			this.target, this.modifier);
 		for (let argument of this.argumentList) {
 			result.addChild(argument as any);
 		}

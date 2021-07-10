@@ -20,7 +20,7 @@ export class Suggestion {
 	public suffix?: string;
 	public order: number = 0;
 
-	constructor(public readonly range: StringRange, public metadata: SuggestionMetadata, public readonly text: string, public readonly tooltip: string | null) { }
+	constructor(public readonly range: StringRange, public metadata: SuggestionMetadata, public readonly text: string, public readonly tooltip?: string) { }
 
 	apply(input: string) {
 		if (this.range.start === 0 && this.range.end === input.length)
@@ -106,7 +106,7 @@ export class SuggestionsBuilder {
 		return Suggestions.create(this.input, this.result);
 	}
 
-	suggest(text: string, tooltip: string | null = null): this {
+	suggest(text: string, tooltip?: string): this {
 		if (text === this.remaining) {
 			return this;
 		}

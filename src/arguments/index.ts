@@ -4,11 +4,11 @@ import { BoolArgumentType } from './bool';
 import { ArgumentType, SimpleArgumentType } from './core';
 import { ErrorableArgumentType } from './errorable';
 import { LazyArgumentType } from './lazy';
-import { ListArgumentType } from './list';
 import type { ListParsingStrategy } from './list';
+import { ListArgumentType } from './list';
 import { FloatArgumentType, IntArgumentType } from './number';
-import { StringArgumentType } from './string';
 import type { StringType } from './string';
+import { StringArgumentType } from './string';
 
 export function booleanArgument() {
 	return new BoolArgumentType();
@@ -22,7 +22,7 @@ export function intArgument(min?: number, max?: number) {
 	return new IntArgumentType(min, max);
 }
 
-export function stringArgument(type: StringType, examples: string[] | null = null) {
+export function stringArgument(type: StringType, examples?: string[]) {
 	return new StringArgumentType(type, examples);
 }
 

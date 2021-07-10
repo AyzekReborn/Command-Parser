@@ -1,12 +1,9 @@
-/// <reference path="tree.d.ts"/>
-import * as isEqual from 'is-equal';
 import { ArgumentType } from "./arguments";
-import { ArgumentBuilder, LiteralArgumentBuilder, RequiredArgumentBuilder } from "./builder";
 import CommandContextBuilder, { Command, CommandContext, CurrentArguments, ParseEntryPoint, RedirectModifier } from "./command";
 import { CommandSyntaxError } from "./error";
 import StringRange from "./range";
 import StringReader from "./reader";
-import { Requirement } from "./requirement";
+import { NormalizedRequirement, RequirementFailure } from "./requirement";
 import { SuggestionProvider, Suggestions, SuggestionsBuilder } from "./suggestions";
 import { MaybePromise } from './util/promise';
 
@@ -16,22 +13,37 @@ export abstract class CommandNode<Source, ArgumentTypeMap extends CurrentArgumen
 	literals: Map<string, LiteralCommandNode<Source, ArgumentTypeMap, ReturnValue>> = new Map();
 	arguments: Map<string, ArgumentCommandNode<any, Source, unknown, unknown, ArgumentTypeMap, ReturnValue>> = new Map();
 	constructor(
-		public command: Command<Source, ArgumentTypeMap, ReturnValue> | null,
-		public commandDescription: string | null,
-		public readonly requirement: Requirement<Source>,
-		public readonly redirect: CommandNode<Source, ArgumentTypeMap, ReturnValue> | null,
-		public readonly modifier: RedirectModifier<Source, ArgumentTypeMap, ReturnValue> | null,
-		public readonly forks: boolean,
+		public command?: Command<Source, ArgumentTypeMap, ReturnValue>,
+		public commandDescription?: string,
+		public readonly requirement?: NormalizedRequirement<Source, ReturnValue>,
+		public readonly redirect?: CommandNode<Source, ArgumentTypeMap, ReturnValue>,
+		public readonly modifier?: RedirectModifier<Source, ArgumentTypeMap, ReturnValue>,
 	) { }
 	get children() { return Array.from(this.childrenMap.values()); }
 	getChild(name: string) {
 		return this.childrenMap.get(name);
 	}
-	canUse(source: Source): boolean {
-		if (!this.requirement(source)) return false;
-		if (this.command) return true;
-		if (this.redirect && this.redirect.canUse(source)) return true;
-		return this.children.some(child => child.canUse(source));
+	checkRequirement(source: Source): RequirementFailure<ReturnValue> | undefined {
+		if (this.requirement) {
+			let failure = this.requirement(source);
+			if (failure) {
+				return failure;
+			}
+		}
+		if (this.command) {
+			return;
+		}
+		if (this.redirect) {
+			let failure = this.redirect.checkRequirement(source);
+			if (!failure) {
+				return;
+			}
+		}
+		for (let child of this.children) {
+			let failure = child.checkRequirement(source);
+			if (!failure)
+				return;
+		}
 	}
 	removeChild(node: CommandNode<Source, ArgumentTypeMap, ReturnValue>) {
 		this.childrenMap.delete(node.name);
@@ -45,7 +57,7 @@ export abstract class CommandNode<Source, ArgumentTypeMap extends CurrentArgumen
 		if (node instanceof RootCommandNode) throw new Error('Cannot add RootCommandNode as child');
 		let child = this.getChild(node.name);
 		if (child) {
-			if (node.command !== null) {
+			if (node.command) {
 				child.command = node.command;
 			}
 			for (let grandchild of node.children) {
@@ -81,18 +93,12 @@ export abstract class CommandNode<Source, ArgumentTypeMap extends CurrentArgumen
 		}
 	}
 	abstract isValidInput<P>(ctx: ParseEntryPoint<P>, input: string): MaybePromise<boolean>;
-	equals(other: CommandNode<Source, ArgumentTypeMap, ReturnValue>): boolean {
-		if (this === other) return true;
-		if (!isEqual(this.childrenMap, other.childrenMap)) return false;
-		if (this.command !== other.command) return false;
-		return true;
-	}
+
 	abstract get name(): string;
 	abstract get usage(): string;
 	abstract parse<P>(ctx: ParseEntryPoint<P>, reader: StringReader, contextBuilder: CommandContextBuilder<Source, ArgumentTypeMap, ReturnValue>): MaybePromise<void>;
 	abstract async listSuggestions<P>(entry: ParseEntryPoint<P>, context: CommandContext<Source, ArgumentTypeMap, ReturnValue>, builder: SuggestionsBuilder): Promise<Suggestions>;
 
-	abstract createBuilder(): ArgumentBuilder<Source, any, any, ReturnValue>;
 	abstract get sortedKey(): string;
 
 	/**
@@ -137,7 +143,7 @@ export class LiteralError extends CommandSyntaxError {
 
 export class PassthroughCommandNode<S, O extends CurrentArguments, ReturnValue> extends CommandNode<S, O, ReturnValue> {
 	constructor(public inner: CommandNode<S, O, ReturnValue>) {
-		super(inner.command, inner.commandDescription, inner.requirement, inner.redirect, inner.modifier, inner.forks);
+		super(inner.command, inner.commandDescription, inner.requirement, inner.redirect, inner.modifier);
 	}
 
 	isValidInput<P>(ctx: ParseEntryPoint<P>, input: string): MaybePromise<boolean> {
@@ -155,9 +161,6 @@ export class PassthroughCommandNode<S, O extends CurrentArguments, ReturnValue> 
 	listSuggestions<P>(entry: ParseEntryPoint<P>, context: CommandContext<S, O, ReturnValue>, builder: SuggestionsBuilder): Promise<Suggestions> {
 		return this.inner.listSuggestions(entry, context, builder);
 	}
-	createBuilder(): ArgumentBuilder<S, any, any, ReturnValue> {
-		return this.inner.createBuilder();
-	}
 	get sortedKey(): string {
 		return this.inner.sortedKey;
 	}
@@ -169,14 +172,13 @@ export class PassthroughCommandNode<S, O extends CurrentArguments, ReturnValue> 
 export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> extends CommandNode<S, O, ReturnValue> {
 	constructor(
 		public readonly literalNames: string[],
-		command: Command<S, O, ReturnValue> | null,
-		commandDescription: string | null,
-		requirement: Requirement<S>,
-		redirect: CommandNode<S, O, ReturnValue> | null,
-		modifier: RedirectModifier<S, O, ReturnValue> | null,
-		forks: boolean,
+		command?: Command<S, O, ReturnValue>,
+		commandDescription?: string,
+		requirement?: NormalizedRequirement<S, ReturnValue>,
+		redirect?: CommandNode<S, O, ReturnValue>,
+		modifier?: RedirectModifier<S, O, ReturnValue>,
 	) {
-		super(command, commandDescription, requirement, redirect, modifier, forks);
+		super(command, commandDescription, requirement, redirect, modifier);
 	}
 
 	get name(): string {
@@ -228,7 +230,7 @@ export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> exte
 		for (const literal of this.literalNames) {
 			if (literal.toLowerCase().startsWith(remaining)) {
 				const other = this.literalNames.filter(e => e !== literal);
-				builder.suggest(literal, other.length === 0 ? null : `${other.join(', ')}`);
+				builder.suggest(literal, other.length === 0 ? undefined : `${other.join(', ')}`);
 			}
 		}
 		return builder.build();
@@ -238,25 +240,8 @@ export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> exte
 		return this._parse(new StringReader(input)) > -1;
 	}
 
-	equals(other: CommandNode<S, O, ReturnValue>): boolean {
-		if (this === other) return true;
-		if (!(other instanceof LiteralCommandNode)) return false;
-		if (this.literalNames !== other.literalNames) return false;
-		return super.equals(other);
-	}
-
 	get usage() {
 		return this.name;
-	}
-
-	createBuilder() {
-		let builder: LiteralArgumentBuilder<S, any, ReturnValue> = new LiteralArgumentBuilder(this.literalNames);
-		builder.requires(this.requirement);
-		builder.forward(this.redirect, this.modifier, this.forks);
-		if (this.command !== null) {
-			builder.executes(this.command);
-		}
-		return builder;
 	}
 
 	get sortedKey() {
@@ -274,7 +259,7 @@ export class LiteralCommandNode<S, O extends CurrentArguments, ReturnValue> exte
 
 export class RootCommandNode<S, ReturnValue> extends CommandNode<S, {}, ReturnValue> {
 	constructor() {
-		super(null, null, () => true, null, (s: CommandContext<S, {}, any>) => [s as any], false);
+		super(undefined, undefined, () => undefined, undefined, (s: CommandContext<S, {}, any>) => s as any);
 	}
 	get name() {
 		return '';
@@ -288,16 +273,6 @@ export class RootCommandNode<S, ReturnValue> extends CommandNode<S, {}, ReturnVa
 	}
 	isValidInput() {
 		return false;
-	}
-
-	equals(other: CommandNode<S, any, ReturnValue>): boolean {
-		if (this === other) return true;
-		if (!(other instanceof RootCommandNode)) return false;
-		return super.equals(other);
-	}
-
-	createBuilder(): ArgumentBuilder<S, any, any, ReturnValue> {
-		throw new Error('Cannot convert root to builder');
 	}
 
 	get sortedKey() {
@@ -317,15 +292,14 @@ export class ArgumentCommandNode<N extends string, S, P, T, O extends CurrentArg
 	constructor(
 		public readonly name: N,
 		public readonly type: ArgumentType<P, T>,
-		public readonly customSuggestions: SuggestionProvider<S> | null,
-		command: Command<S, O, ReturnValue> | null,
-		commandDescription: string | null,
-		requirement: Requirement<S>,
-		redirect: CommandNode<S, O, ReturnValue> | null,
-		modifier: RedirectModifier<S, O, ReturnValue> | null,
-		forks: boolean,
+		public readonly customSuggestions?: SuggestionProvider<S>,
+		command?: Command<S, O, ReturnValue>,
+		commandDescription?: string,
+		requirement?: NormalizedRequirement<S, ReturnValue>,
+		redirect?: CommandNode<S, O, ReturnValue>,
+		modifier?: RedirectModifier<S, O, ReturnValue>,
 	) {
-		super(command, commandDescription, requirement, redirect, modifier, forks);
+		super(command, commandDescription, requirement, redirect, modifier);
 	}
 
 	get usage() {
@@ -358,18 +332,6 @@ export class ArgumentCommandNode<N extends string, S, P, T, O extends CurrentArg
 		return got;
 	}
 
-	createBuilder(): RequiredArgumentBuilder<N, S, P, T, O, ReturnValue> {
-		let builder: RequiredArgumentBuilder<N, S, P, T, O, ReturnValue> = new RequiredArgumentBuilder(this.name, this.type);
-		builder.requires(this.requirement);
-		builder.forward(this.redirect, this.modifier, this.forks);
-		if (this.customSuggestions)
-			builder.suggests(this.customSuggestions);
-		if (this.command !== null) {
-			builder.executes(this.command);
-		}
-		return builder;
-	}
-
 	async isValidInput<P>(ctx: ParseEntryPoint<P>, input: string) {
 		try {
 			let reader = new StringReader(input);
@@ -378,14 +340,6 @@ export class ArgumentCommandNode<N extends string, S, P, T, O extends CurrentArg
 		} catch {
 			return false;
 		}
-	}
-
-	equals(other: CommandNode<S, O, ReturnValue>): boolean {
-		if (this === other) return true;
-		if (!(other instanceof ArgumentCommandNode)) return false;
-		if (this.name !== other.name) return false;
-		if (this.type !== other.type) return false;
-		return super.equals(other);
 	}
 
 	get sortedKey() {
@@ -405,8 +359,5 @@ export class ParsedCommandNode<S, ReturnValue> {
 	constructor(public readonly node: CommandNode<S, any, ReturnValue>, public readonly range: StringRange) { }
 	toString() {
 		return `${this.node}@${this.range}`
-	}
-	equals(other: this) {
-		return this.node.equals(other.node) && this.range.equals(other.range);
 	}
 }
